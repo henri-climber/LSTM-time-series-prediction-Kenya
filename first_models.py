@@ -12,7 +12,7 @@ from data_preprocessing import create_final_ds, create_tf_dataset
 EPOCHS = 50
 
 train_ds, val_ds, test_ds, train_df, train_ds_not_norm, train_df_norm, test_df_norm, val_df_norm, min_v, max_v = create_final_ds(
-    "SHA", "nit")
+    "SHA", "nit", batch_size=128)
 
 model = tf.keras.models.Sequential([
     tf.keras.layers.LSTM(64, return_sequences=True),
@@ -40,6 +40,7 @@ early_stopping = tf.keras.callbacks.EarlyStopping(
     monitor="val_r_square",
     patience=4,
     min_delta=0.001,
+    mode="max"
 )
 
 

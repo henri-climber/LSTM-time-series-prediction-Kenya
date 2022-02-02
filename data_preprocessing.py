@@ -136,7 +136,7 @@ def create_tf_dataset(data_in, label, seq_length=72, batch_size=32):
     return ds
 
 
-def create_final_ds(station, label, interval=None):
+def create_final_ds(station, label, interval=None, batch_size=32):
     if os.path.exists(f"{station}-dataframe.pkl") and interval is None:
         print("loading normal pickle")
         df = pd.read_pickle(f"{station}-dataframe.pkl")
@@ -169,11 +169,11 @@ def create_final_ds(station, label, interval=None):
     test_df_norm = (test_df - train_min) / (train_max - train_min)
 
     # creating tensorflow time series datasets
-    train_ds_norm = create_tf_dataset(train_df_norm, label)
-    val_ds_norm = create_tf_dataset(val_df_norm, label)
-    test_ds_norm = create_tf_dataset(test_df_norm, label)
+    train_ds_norm = create_tf_dataset(train_df_norm, label, batch_size=batch_size)
+    val_ds_norm = create_tf_dataset(val_df_norm, label, batch_size=batch_size)
+    test_ds_norm = create_tf_dataset(test_df_norm, label, batch_size=batch_size)
 
-    train_ds = create_tf_dataset(train_df, label)
+    train_ds = create_tf_dataset(train_df, label, batch_size=batch_size)
 
     # only the first three return values are needed for training
     return train_ds_norm, val_ds_norm, test_ds_norm, train_df, train_ds, train_df_norm, test_df_norm, val_df_norm, train_min, train_max
