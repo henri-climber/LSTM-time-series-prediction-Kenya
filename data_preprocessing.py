@@ -3,6 +3,8 @@ import os
 import numpy as np
 import pandas as pd
 import tensorflow as tf
+from matplotlib import pyplot as plt
+import seaborn as sns
 
 pd.set_option('display.max_columns', 500)
 
@@ -119,7 +121,7 @@ def load_data(station, interval=None):
     return df
 
 
-def create_tf_dataset(data_in, label, seq_length=72, batch_size=32):
+def create_tf_dataset(data_in, label, seq_length=3, batch_size=32):
     data = data_in.drop([label], axis=1)
     # data = data_in.copy()
     data = data[:-seq_length]
@@ -136,7 +138,7 @@ def create_tf_dataset(data_in, label, seq_length=72, batch_size=32):
     return ds
 
 
-def create_final_ds(station, label, interval=None, batch_size=32):
+def create_final_ds(station, label, interval=None, batch_size=32, seq_length=3):
     if os.path.exists(f"{station}-dataframe.pkl") and interval is None:
         print("loading normal pickle")
         df = pd.read_pickle(f"{station}-dataframe.pkl")
@@ -169,11 +171,11 @@ def create_final_ds(station, label, interval=None, batch_size=32):
     test_df_norm = (test_df - train_min) / (train_max - train_min)
 
     # creating tensorflow time series datasets
-    train_ds_norm = create_tf_dataset(train_df_norm, label, batch_size=batch_size)
-    val_ds_norm = create_tf_dataset(val_df_norm, label, batch_size=batch_size)
-    test_ds_norm = create_tf_dataset(test_df_norm, label, batch_size=batch_size)
+    train_ds_norm = create_tf_dataset(train_df_norm, label, batch_size=batch_size, seq_length=seq_length)
+    val_ds_norm = create_tf_dataset(val_df_norm, label, batch_size=batch_size, seq_length=seq_length)
+    test_ds_norm = create_tf_dataset(test_df_norm, label, batch_size=batch_size,seq_length=seq_length)
 
-    train_ds = create_tf_dataset(train_df, label, batch_size=batch_size)
+    train_ds = create_tf_dataset(train_df, label, batch_size=batch_size, seq_length=seq_length)
 
     # only the first three return values are needed for training
     return train_ds_norm, val_ds_norm, test_ds_norm, train_df, train_ds, train_df_norm, test_df_norm, val_df_norm, train_min, train_max

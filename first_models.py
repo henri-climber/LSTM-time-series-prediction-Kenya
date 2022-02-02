@@ -12,12 +12,13 @@ from data_preprocessing import create_final_ds, create_tf_dataset
 EPOCHS = 50
 
 train_ds, val_ds, test_ds, train_df, train_ds_not_norm, train_df_norm, test_df_norm, val_df_norm, min_v, max_v = create_final_ds(
-    "SHA", "nit", batch_size=128)
+    "SHA", "nit", batch_size=32, interval=18, seq_length=8)
+
 
 model = tf.keras.models.Sequential([
-    tf.keras.layers.LSTM(64, return_sequences=True),
+    tf.keras.layers.LSTM(32, return_sequences=True),
     tf.keras.layers.Dropout(0.2),
-    tf.keras.layers.LSTM(128, return_sequences=True),
+    tf.keras.layers.LSTM(64, return_sequences=True),
     tf.keras.layers.Dropout(0.3),
 
     tf.keras.layers.GlobalMaxPooling1D(),
@@ -33,14 +34,13 @@ model.compile(loss=tf.losses.MeanSquaredError(),
               metrics=[tfa.metrics.RSquare(dtype=tf.float32, y_shape=(1,))])
 
 # tfa.metrics.RSquare(dtype=tf.float32, y_shape=(1,))
-# tf.metric.MeanSquaredError()
+# tf.metrics.RootMeanSquaredError()
 # tf.metrics.MeanAbsoluteError()
 
 early_stopping = tf.keras.callbacks.EarlyStopping(
-    monitor="val_r_square",
+    monitor="val_mean_absolute_error",
     patience=4,
     min_delta=0.001,
-    mode="max"
 )
 
 
@@ -48,13 +48,13 @@ def train_model():
     history = model.fit(train_ds, epochs=EPOCHS,
                         validation_data=val_ds, callbacks=[early_stopping])
 
-    model.save("R2_interval=1.h5")
+    model.save("MAE_interval=18.h5")
 
     # list all data in history
     print(history.history.keys())
     # visualize history for accuracy
-    plt.plot(history.history['r_square'])
-    plt.plot(history.history['val_r_square'])
+    plt.plot(history.history['mean_absolute_error'])
+    plt.plot(history.history['val_mean_absolute_error'])
     plt.title('model MSE')
     plt.ylabel('MSE')
     plt.xlabel('epoch')
@@ -71,13 +71,15 @@ def train_model():
     plt.show()
 
 
-train_model()
+# train_model()
 
 
 def visualize_model():
     model.evaluate(train_ds.take(1))
-    model.load_weights("nit_models/RMSE_interval=1.h5")
-
+    model.load_weights("nit_models/R2_interval=18.h5")
+    print(model.evaluate(test_ds))
+    print(model.evaluate(train_ds))
+    print(model.evaluate(val_ds))
     # visualize specific length of data
     """predictions = []
     labels = []
@@ -119,6 +121,9 @@ def visualize_model():
     plt.legend()
 
     plt.show()
+
+
+visualize_model()
 
 
 def extract_feature_importance():
