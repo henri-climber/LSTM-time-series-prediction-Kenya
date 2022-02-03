@@ -5,6 +5,7 @@ import pandas as pd
 import tensorflow as tf
 from matplotlib import pyplot as plt
 import seaborn as sns
+from sklearn.preprocessing import MinMaxScaler
 
 pd.set_option('display.max_columns', 500)
 
@@ -12,33 +13,28 @@ pd.set_option('display.max_columns', 500)
 def create_df_of_file(filename, measure, directory="Data", interval=None):
     dataframe = pd.read_csv(os.path.join(directory, filename))
 
-    # linear interpolation to fill NA values
-    dataframe = dataframe.interpolate("linear")
-
     # set start of dataframe to time where it was in Kenya
     time = dataframe["date"].tolist()
     start = time.index("2015-04-21 11:00:00")
     dataframe = dataframe[start:]
 
-    # rename value column to actual measure category
-    dataframe.rename(columns={"value": measure}, inplace=True)
-
+    # linear interpolation to fill NA values
+    dataframe = dataframe.interpolate("linear")
     # remove all non valid measure times (only measurements in 10minute steps are valid)
     dataframe = dataframe[dataframe["date"].str[-4:] == "0:00"]
     time = dataframe["date"].tolist()
 
-    # extract time values and replace with index
-    date_time = pd.to_datetime(dataframe.pop('date'), format='%Y-%m-%d %H:%M:%S')
-    date_time.reset_index(inplace=True, drop=True)
+    dataframe['date'] = pd.to_datetime(dataframe.pop('date'), format='%Y-%m-%d %H:%M:%S')
+    dataframe.index = dataframe["date"]
+
+    dataframe = dataframe.resample("3h").mean()
+
+    # rename value column to actual measure category
+    dataframe.rename(columns={"value": measure}, inplace=True)
 
     dataframe.reset_index(inplace=True, drop=True)
 
-    if interval is not None:
-        dataframe = dataframe.rolling(interval, min_periods=1).mean()
-        dataframe = dataframe[interval::interval]
-        dataframe.reset_index(inplace=True, drop=True)
-
-    return dataframe, date_time, time
+    return dataframe, time
 
 
 def create_prec_df(time_df, station, interval=None):
@@ -47,14 +43,13 @@ def create_prec_df(time_df, station, interval=None):
     """
 
     dataframe = pd.read_csv(os.path.join("Data", f"{station}-prec.csv"))
-
-    # linear interpolation to fill NA values
-    dataframe = dataframe.interpolate("linear")
-
     time = dataframe["date"].tolist()
     start = time.index("2015-04-21 11:00:00")
     time = time[start:]
     dataframe = dataframe[start:]
+
+    # linear interpolation to fill NA values
+    dataframe = dataframe.interpolate("linear")
 
     dataframe.rename(columns={"value": "prec"}, inplace=True)
 
@@ -64,12 +59,13 @@ def create_prec_df(time_df, station, interval=None):
     to_remove = list(set(time).difference(set(time_df)))
     dataframe.drop(labels=to_remove, inplace=True, errors="ignore")
 
-    dataframe.reset_index(inplace=True, drop=True)
+    dataframe.reset_index(inplace=True, drop=False)
 
-    if interval is not None:
-        dataframe = dataframe.rolling(interval, min_periods=1).sum()
-        dataframe = dataframe[interval::interval]
-        dataframe.reset_index(inplace=True, drop=True)
+    dataframe['date'] = pd.to_datetime(dataframe.pop('date'), format='%Y-%m-%d %H:%M:%S')
+    dataframe.index = dataframe["date"]
+    dataframe = dataframe.resample("3h").sum()
+
+    dataframe.reset_index(inplace=True, drop=True)
 
     return dataframe
 
@@ -88,50 +84,21 @@ def load_data(station, interval=None):
 
     frames = [create_df_of_file(file, file[4:7], interval=interval)[0] for file in filenames]
 
-    _, date_time, df_time = create_df_of_file(f"{station}-nit.csv", "nit", interval=interval)
+    _, df_time = create_df_of_file(f"{station}-nit.csv", "nit", interval=interval)
     prec_df = create_prec_df(df_time, station, interval=interval)
 
     frames.append(prec_df)
 
     df = pd.concat(frames, axis=1)
 
-    # transforming time input
-    timestamp_s = date_time.map(pd.Timestamp.timestamp)
-
-    day = 24 * 60 * 60
-    year = 365.2425 * day
-
-    if interval is not None:
-        day_df = np.sin(timestamp_s * (2 * np.pi / day))
-        year_df = np.sin(timestamp_s * (2 * np.pi / year))
-
-        day_df = day_df.rolling(interval, min_periods=1).mean()[interval::interval]
-        day_df.reset_index(inplace=True, drop=True)
-
-        year_df = year_df.rolling(interval, min_periods=1).mean()[interval::interval]
-        year_df.reset_index(inplace=True, drop=True)
-
-        df["Day Sin"] = day_df
-        df["Year Sin"] = year_df
-
-    else:
-        df['Day sin'] = np.sin(timestamp_s * (2 * np.pi / day))
-        df['Year sin'] = np.sin(timestamp_s * (2 * np.pi / year))
-
     return df
 
 
-def create_tf_dataset(data_in, label, seq_length=3, batch_size=32):
-    data = data_in.drop([label], axis=1)
-    # data = data_in.copy()
+def create_tf_dataset(data, label, seq_length=3, batch_size=32):
     data = data[:-seq_length]
-    data = np.array(data, dtype=np.float32)
+    label = label[seq_length:]
 
-    targets = data_in[label]
-    targets = targets[seq_length - 1:]
-    targets = np.array(targets, dtype=np.float32)
-
-    ds = tf.keras.utils.timeseries_dataset_from_array(data, targets, sequence_length=seq_length,
+    ds = tf.keras.utils.timeseries_dataset_from_array(data, label, sequence_length=seq_length,
                                                       sequence_stride=1,
                                                       batch_size=batch_size, )
 
@@ -162,20 +129,24 @@ def create_final_ds(station, label, interval=None, batch_size=32, seq_length=3):
     val_df = df[int(n * 0.7):int(n * 0.9)]
     test_df = df[int(n * 0.9):]
 
-    # min max normalization
-    train_min = train_df.min()
-    train_max = train_df.max()
+    feature_train = train_df.drop(["nit"], axis=1)
+    feature_val = val_df.drop(["nit"], axis=1)
+    feature_test = test_df.drop(["nit"], axis=1)
 
-    train_df_norm = (train_df - train_min) / (train_max - train_min)
-    val_df_norm = (val_df - train_min) / (train_max - train_min)
-    test_df_norm = (test_df - train_min) / (train_max - train_min)
+    feature_scaler = MinMaxScaler(feature_range=(0, 1))
+    feature_scaler.fit(feature_train.to_numpy())
+    feature_train_scaled = feature_scaler.transform(feature_train)
+    feature_val_scaled = feature_scaler.transform(feature_val)
+    feature_test_scaled = feature_scaler.transform(feature_test)
+
+    target_train = np.array(train_df["nit"], ndmin=2).T
+    target_val = np.array(val_df["nit"], ndmin=2).T
+    target_test = np.array(test_df["nit"], ndmin=2).T
 
     # creating tensorflow time series datasets
-    train_ds_norm = create_tf_dataset(train_df_norm, label, batch_size=batch_size, seq_length=seq_length)
-    val_ds_norm = create_tf_dataset(val_df_norm, label, batch_size=batch_size, seq_length=seq_length)
-    test_ds_norm = create_tf_dataset(test_df_norm, label, batch_size=batch_size,seq_length=seq_length)
-
-    train_ds = create_tf_dataset(train_df, label, batch_size=batch_size, seq_length=seq_length)
+    train_ds_norm = create_tf_dataset(feature_train_scaled, target_train, batch_size=batch_size, seq_length=seq_length)
+    val_ds_norm = create_tf_dataset(feature_val_scaled, target_val, batch_size=batch_size, seq_length=seq_length)
+    test_ds_norm = create_tf_dataset(feature_test_scaled, target_test, batch_size=batch_size, seq_length=seq_length)
 
     # only the first three return values are needed for training
-    return train_ds_norm, val_ds_norm, test_ds_norm, train_df, train_ds, train_df_norm, test_df_norm, val_df_norm, train_min, train_max
+    return train_ds_norm, val_ds_norm, test_ds_norm, train_df

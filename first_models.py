@@ -11,8 +11,8 @@ from data_preprocessing import create_final_ds, create_tf_dataset
 # uses Early Stopping
 EPOCHS = 50
 
-train_ds, val_ds, test_ds, train_df, train_ds_not_norm, train_df_norm, test_df_norm, val_df_norm, min_v, max_v = create_final_ds(
-    "SHA", "nit", batch_size=32, interval=18, seq_length=8)
+train_ds, val_ds, test_ds, train_df, = create_final_ds(
+    "SHA", "nit", batch_size=32, seq_length=8, interval=18)
 
 
 model = tf.keras.models.Sequential([
@@ -31,15 +31,15 @@ model = tf.keras.models.Sequential([
 
 model.compile(loss=tf.losses.MeanSquaredError(),
               optimizer=tf.optimizers.Adam(learning_rate=0.0001),
-              metrics=[tfa.metrics.RSquare(dtype=tf.float32, y_shape=(1,))])
+              metrics=[tf.metrics.RootMeanSquaredError()])
 
 # tfa.metrics.RSquare(dtype=tf.float32, y_shape=(1,))
 # tf.metrics.RootMeanSquaredError()
 # tf.metrics.MeanAbsoluteError()
 
 early_stopping = tf.keras.callbacks.EarlyStopping(
-    monitor="val_mean_absolute_error",
-    patience=4,
+    monitor="val_root_mean_squared_error",
+    patience=20,
     min_delta=0.001,
 )
 
@@ -48,13 +48,13 @@ def train_model():
     history = model.fit(train_ds, epochs=EPOCHS,
                         validation_data=val_ds, callbacks=[early_stopping])
 
-    model.save("MAE_interval=18.h5")
+    model.save("MAE_interval=3h.h5")
 
     # list all data in history
     print(history.history.keys())
     # visualize history for accuracy
-    plt.plot(history.history['mean_absolute_error'])
-    plt.plot(history.history['val_mean_absolute_error'])
+    plt.plot(history.history['root_mean_squared_error'])
+    plt.plot(history.history['val_root_mean_squared_error'])
     plt.title('model MSE')
     plt.ylabel('MSE')
     plt.xlabel('epoch')
@@ -71,12 +71,12 @@ def train_model():
     plt.show()
 
 
-# train_model()
+train_model()
 
 
 def visualize_model():
     model.evaluate(train_ds.take(1))
-    model.load_weights("nit_models/R2_interval=18.h5")
+    model.load_weights("nit_models/RMSE_interval=18.h5")
     print(model.evaluate(test_ds))
     print(model.evaluate(train_ds))
     print(model.evaluate(val_ds))
@@ -97,15 +97,15 @@ def visualize_model():
     print(predictions)
     print(labels)"""
 
-    # visualize whole dataset
+    """# visualize whole dataset
     predictions = model.predict(test_ds).flatten()
-    labels = np.array(test_df_norm["nit"])
+    #labels = np.array(test_df_norm["nit"])
 
     x = range(0, len(predictions))
     x1 = range(0, len(labels))
 
     # convert normalized values to actual previous values
-    reconstruct_norm = lambda d: d * (max_v["nit"] - min_v["nit"]) + min_v["nit"]
+    #reconstruct_norm = lambda d: d * (max_v["nit"] - min_v["nit"]) + min_v["nit"]
     predictions = reconstruct_norm(np.array(predictions))
     labels = reconstruct_norm(np.array(labels))
 
@@ -121,9 +121,6 @@ def visualize_model():
     plt.legend()
 
     plt.show()
-
-
-visualize_model()
 
 
 def extract_feature_importance():
@@ -168,4 +165,4 @@ def calculate_important_features():
 
 def show_important_features():
     feature_df = pd.read_pickle("feature_importance.pkl")
-    print(feature_df)
+    print(feature_df)"""
