@@ -3,23 +3,19 @@ import os
 import numpy as np
 import pandas as pd
 import tensorflow as tf
-from matplotlib import pyplot as plt
-import seaborn as sns
 from sklearn.preprocessing import MinMaxScaler
 
 pd.set_option('display.max_columns', 500)
 
 
-def create_df_of_file(filename, measure, directory="Data", interval=None):
+def create_df_of_file(filename, measure, interval, directory="Data", ):
     dataframe = pd.read_csv(os.path.join(directory, filename))
 
-    # set start of dataframe to time where it was in Kenya
+    # set start of dataframe to time when it was in Kenya
     time = dataframe["date"].tolist()
     start = time.index("2015-04-21 11:00:00")
     dataframe = dataframe[start:]
 
-    # linear interpolation to fill NA values
-    dataframe = dataframe.interpolate("linear")
     # remove all non valid measure times (only measurements in 10minute steps are valid)
     dataframe = dataframe[dataframe["date"].str[-4:] == "0:00"]
     time = dataframe["date"].tolist()
@@ -27,17 +23,20 @@ def create_df_of_file(filename, measure, directory="Data", interval=None):
     dataframe['date'] = pd.to_datetime(dataframe.pop('date'), format='%Y-%m-%d %H:%M:%S')
     dataframe.index = dataframe["date"]
 
-    dataframe = dataframe.resample("3h").mean()
+    dataframe = dataframe.resample(interval).mean()
+
+    # linear interpolation to fill NA values
+    dataframe = dataframe.interpolate()
 
     # rename value column to actual measure category
-    dataframe.rename(columns={"value": measure}, inplace=True)
+    dataframe.rename(columns={"value": f"{filename[:3]}_{measure}"}, inplace=True)
 
     dataframe.reset_index(inplace=True, drop=True)
 
     return dataframe, time
 
 
-def create_prec_df(time_df, station, interval=None):
+def create_prec_df(time_df, station, interval):
     """
     This function is needed because the prec data had way more measurements than all the other data.
     """
@@ -51,7 +50,7 @@ def create_prec_df(time_df, station, interval=None):
     # linear interpolation to fill NA values
     dataframe = dataframe.interpolate("linear")
 
-    dataframe.rename(columns={"value": "prec"}, inplace=True)
+    dataframe.rename(columns={"value": f"{station}_prec"}, inplace=True)
 
     dataframe.set_index('date', inplace=True)
 
@@ -63,31 +62,47 @@ def create_prec_df(time_df, station, interval=None):
 
     dataframe['date'] = pd.to_datetime(dataframe.pop('date'), format='%Y-%m-%d %H:%M:%S')
     dataframe.index = dataframe["date"]
-    dataframe = dataframe.resample("3h").sum()
+    dataframe.drop(labels="date", axis=1, inplace=True)
 
-    dataframe.reset_index(inplace=True, drop=True)
+    dataframe = dataframe.resample(interval).sum()
+
+    dataframe.reset_index(inplace=True)
 
     return dataframe
 
 
-def create_filenames(station):
-    categories = ["nit", "doc", "disch", "elc", "tcd", "toc", "tsp", "tur", "wl"]
+def create_filenames(stations):
+    categories_sha = ["nit", "doc", "disch", "elc", "tcd", "toc", "tsp", "tur", "wl"]
+    categories_wsh = ["dir", "gust", "par", "ec15", "rh", "stemp15", "temp", "vwc15", "wind"]
     filenames = []
+    for station in stations:
+        if station == "SHA":
+            for category in categories_sha:
+                filenames.append(f"{station}-{category}.csv")
 
-    for category in categories:
-        filenames.append(f"{station}-{category}.csv")
+        elif station == "WSH":
+            for category in categories_wsh:
+                filenames.append(f"{station}-{category}.csv")
     return filenames
 
 
-def load_data(station, interval=None):
-    filenames = create_filenames(station)
+def load_data(stations, interval=None):
+    filenames = create_filenames(stations)
+    frames = []
 
-    frames = [create_df_of_file(file, file[4:7], interval=interval)[0] for file in filenames]
+    for filename in filenames:
+        measure = filename.split("-")[1].split(".")[0]
+        frames.append(create_df_of_file(filename, measure, interval=interval)[0])
 
-    _, df_time = create_df_of_file(f"{station}-nit.csv", "nit", interval=interval)
-    prec_df = create_prec_df(df_time, station, interval=interval)
-
-    frames.append(prec_df)
+    _, df_time = create_df_of_file("SHA-nit.csv", "nit", interval=interval)
+    sha_prec_df = create_prec_df(df_time, "SHA", interval=interval)
+    fun_prec_df = create_prec_df(df_time, "Fun", interval=interval)
+    kur_prec_df = create_prec_df(df_time, "Kur", interval=interval)
+    wsh_prec_df = create_prec_df(df_time, "WSH", interval=interval)
+    frames.append(sha_prec_df)
+    frames.append(fun_prec_df)
+    frames.append(kur_prec_df)
+    frames.append(wsh_prec_df)
 
     df = pd.concat(frames, axis=1)
 
@@ -105,33 +120,37 @@ def create_tf_dataset(data, label, seq_length=3, batch_size=32):
     return ds
 
 
-def create_final_ds(station, label, interval=None, batch_size=32, seq_length=3):
+def create_final_ds(station, stations, label, interval=None, batch_size=32, seq_length=3):
     if os.path.exists(f"{station}-dataframe.pkl") and interval is None:
         print("loading normal pickle")
         df = pd.read_pickle(f"{station}-dataframe.pkl")
 
     elif interval is not None:
-        if os.path.exists(f"{station}-dataframe-interval{interval}.pkl"):
+        if os.path.exists(f"{station}-dataframe-interval-{interval}.pkl"):
             print("loading pickle")
-            df = pd.read_pickle(f"{station}-dataframe-interval{interval}.pkl")
+            df = pd.read_pickle(f"{station}-dataframe-interval-{interval}.pkl")
         else:
             print("creating Data")
-            df = load_data(station, interval=interval)
-            df.to_pickle(f"{station}-dataframe-interval{interval}.pkl")
+            df = load_data(stations, interval=interval)
+            df.to_pickle(f"{station}-dataframe-interval-{interval}.pkl")
 
     else:
-        df = load_data(station)
+        df = load_data(stations)
         df.to_pickle(f"{station}-dataframe.pkl")
 
-    # split data into train (70%), val (20%) and test (10%) data
-    n = len(df)
-    train_df = df[0:int(n * 0.7)]
-    val_df = df[int(n * 0.7):int(n * 0.9)]
-    test_df = df[int(n * 0.9):]
+    df = df.drop(["SHA_doc", "SHA_tur", "SHA_toc", "SHA_tcd", "SHA_tsp"], axis=1)
 
-    feature_train = train_df.drop(["nit"], axis=1)
-    feature_val = val_df.drop(["nit"], axis=1)
-    feature_test = test_df.drop(["nit"], axis=1)
+    df.drop(columns=df.columns[df.columns.duplicated()], inplace=True)
+
+    # split data into train (60%), val (20%) and test (20%) data
+    n = len(df)
+    train_df = df[0:int(n * 0.6)]
+    val_df = df[int(n * 0.6):int(n * 0.8)]
+    test_df = df[int(n * 0.8):]
+
+    feature_train = train_df.drop([label], axis=1)
+    feature_val = val_df.drop([label], axis=1)
+    feature_test = test_df.drop([label], axis=1)
 
     feature_scaler = MinMaxScaler(feature_range=(0, 1))
     feature_scaler.fit(feature_train.to_numpy())
@@ -139,9 +158,9 @@ def create_final_ds(station, label, interval=None, batch_size=32, seq_length=3):
     feature_val_scaled = feature_scaler.transform(feature_val)
     feature_test_scaled = feature_scaler.transform(feature_test)
 
-    target_train = np.array(train_df["nit"], ndmin=2).T
-    target_val = np.array(val_df["nit"], ndmin=2).T
-    target_test = np.array(test_df["nit"], ndmin=2).T
+    target_train = np.array(train_df[label], ndmin=2).T
+    target_val = np.array(val_df[label], ndmin=2).T
+    target_test = np.array(test_df[label], ndmin=2).T
 
     # creating tensorflow time series datasets
     train_ds_norm = create_tf_dataset(feature_train_scaled, target_train, batch_size=batch_size, seq_length=seq_length)
@@ -149,4 +168,8 @@ def create_final_ds(station, label, interval=None, batch_size=32, seq_length=3):
     test_ds_norm = create_tf_dataset(feature_test_scaled, target_test, batch_size=batch_size, seq_length=seq_length)
 
     # only the first three return values are needed for training
-    return train_ds_norm, val_ds_norm, test_ds_norm, train_df
+    return train_ds_norm, val_ds_norm, test_ds_norm, train_df, test_df, val_df
+
+
+train_ds, val_ds, test_ds, train_df, test_df, val_df = create_final_ds(
+    "SHA", ["SHA", "WSH"], "SHA_nit", batch_size=32, seq_length=2, interval="24h")

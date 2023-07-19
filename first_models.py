@@ -2,59 +2,46 @@ import numpy as np
 import pandas as pd
 
 import matplotlib.pyplot as plt
-import tensorflow as tf
-import tensorflow_addons as tfa
 import seaborn as sns
+from sklearn.preprocessing import MinMaxScaler
 
+from common_functions import create_model
 from data_preprocessing import create_final_ds, create_tf_dataset
 
+"""
+This was used to generate some first models and get a better feel for the data
+"""
+
 # uses Early Stopping
-EPOCHS = 50
+EPOCHS = 70
+# MODEL CONFIG
+nodes_lstm = 20
+dropout = 0.1
+learning_rate = 0.001
+metric = "r_square"
+batch_size = 32
+seq_length = 1
 
-train_ds, val_ds, test_ds, train_df, = create_final_ds(
-    "SHA", "nit", batch_size=32, seq_length=8, interval=18)
+model_filename = f"rmse_{nodes_lstm}_001_{seq_length}_{batch_size}_01.h5"
 
 
-model = tf.keras.models.Sequential([
-    tf.keras.layers.LSTM(32, return_sequences=True),
-    tf.keras.layers.Dropout(0.2),
-    tf.keras.layers.LSTM(64, return_sequences=True),
-    tf.keras.layers.Dropout(0.3),
+train_ds, val_ds, test_ds, train_df, test_df, val_df = create_final_ds(
+    "SHA", ["SHA", "WSH"], "SHA_nit", batch_size=batch_size, seq_length=seq_length, interval="24h")
 
-    tf.keras.layers.GlobalMaxPooling1D(),
-
-    tf.keras.layers.Dense(64, activation="relu"),
-    tf.keras.layers.Dropout(0.2),
-
-    tf.keras.layers.Dense(1, activation="linear")
-])
-
-model.compile(loss=tf.losses.MeanSquaredError(),
-              optimizer=tf.optimizers.Adam(learning_rate=0.0001),
-              metrics=[tf.metrics.RootMeanSquaredError()])
-
-# tfa.metrics.RSquare(dtype=tf.float32, y_shape=(1,))
-# tf.metrics.RootMeanSquaredError()
-# tf.metrics.MeanAbsoluteError()
-
-early_stopping = tf.keras.callbacks.EarlyStopping(
-    monitor="val_root_mean_squared_error",
-    patience=20,
-    min_delta=0.001,
-)
+model, early_stopping = create_model(nodes_lstm, None, dropout, metric, learning_rate)
 
 
 def train_model():
     history = model.fit(train_ds, epochs=EPOCHS,
-                        validation_data=val_ds, callbacks=[early_stopping])
+                        validation_data=val_ds)
 
-    model.save("MAE_interval=3h.h5")
+    model.save(model_filename)
 
     # list all data in history
     print(history.history.keys())
     # visualize history for accuracy
-    plt.plot(history.history['root_mean_squared_error'])
-    plt.plot(history.history['val_root_mean_squared_error'])
+    plt.plot(history.history['r_square'])
+    plt.plot(history.history['val_r_square'])
     plt.title('model MSE')
     plt.ylabel('MSE')
     plt.xlabel('epoch')
@@ -71,12 +58,9 @@ def train_model():
     plt.show()
 
 
-train_model()
-
-
 def visualize_model():
     model.evaluate(train_ds.take(1))
-    model.load_weights("nit_models/RMSE_interval=18.h5")
+    model.load_weights(model_filename)
     print(model.evaluate(test_ds))
     print(model.evaluate(train_ds))
     print(model.evaluate(val_ds))
@@ -97,17 +81,42 @@ def visualize_model():
     print(predictions)
     print(labels)"""
 
-    """# visualize whole dataset
-    predictions = model.predict(test_ds).flatten()
-    #labels = np.array(test_df_norm["nit"])
+    for ds, df in ((train_ds, train_df), (val_ds, val_df), (test_ds, test_df)):
+        # visualize
+        predictions = model.predict(ds).flatten()
+        labels = np.array(df["SHA_nit"])
+
+        x = range(0, len(predictions))
+        x1 = range(0, len(labels))
+
+        print(predictions)
+        print(labels)
+
+        sns.set()
+        fig, ax1 = plt.subplots()
+
+        ax1.plot(x1, labels, color="blue", label="actual", linewidth=1)
+        ax1.plot(x, predictions, color="orange", label="Predictions", linewidth=1.5)
+        plt.title("Train Data")
+        plt.legend()
+
+        plt.show()
+
+
+def visualize_whole_dataset_model():
+    model.evaluate(train_ds.take(1))
+    model.load_weights(model_filename)
+
+    full_ds = train_ds.concatenate(val_ds)
+    full_ds = full_ds.concatenate(test_ds)
+    full_df = train_df.append(val_df)
+    full_df = full_df.append(test_df)
+    # visualize
+    predictions = model.predict(full_ds).flatten()
+    labels = np.array(full_df["SHA_nit"])
 
     x = range(0, len(predictions))
     x1 = range(0, len(labels))
-
-    # convert normalized values to actual previous values
-    #reconstruct_norm = lambda d: d * (max_v["nit"] - min_v["nit"]) + min_v["nit"]
-    predictions = reconstruct_norm(np.array(predictions))
-    labels = reconstruct_norm(np.array(labels))
 
     print(predictions)
     print(labels)
@@ -117,27 +126,39 @@ def visualize_model():
 
     ax1.plot(x1, labels, color="blue", label="actual", linewidth=1)
     ax1.plot(x, predictions, color="orange", label="Predictions", linewidth=1.5)
-
+    plt.title("Train data | val data | test data")
     plt.legend()
+
+    for i in range(3):
+        plt.axvline(len(train_df) + i, color="r")
+    for i in range(3):
+        plt.axvline(len(train_df) + len(val_df) + i, color="r")
 
     plt.show()
 
 
 def extract_feature_importance():
     model.evaluate(test_ds.take(1))
-    model.load_weights("nit_models/MAE_interval=6.h5")
+    model.load_weights("RMSE_interval=24h.h5")
 
     feature_df = pd.DataFrame(columns=["Feature removed", "loss", "RMSE"])
 
     loss, metric = model.evaluate(train_ds)
     feature_df.loc[0] = ["Normal"] + [loss] + [metric]
 
-    for ind, feature in enumerate(train_df_norm.columns[1:]):
+    for ind, feature in enumerate(train_df.columns[1:]):
         # shuffle the feature
-        n_df = train_df_norm.copy()
+        n_df = train_df.copy()
         np.random.shuffle(n_df[feature])
 
-        feature_dataset = create_tf_dataset(n_df, "nit")
+        feature_train = n_df.drop(["nit"], axis=1)
+
+        feature_scaler = MinMaxScaler(feature_range=(0, 1))
+        feature_scaler.fit(feature_train.to_numpy())
+        feature_train_scaled = feature_scaler.transform(feature_train)
+        target_train = np.array(n_df["nit"], ndmin=2).T
+
+        feature_dataset = create_tf_dataset(feature_train_scaled, target_train, batch_size=32, seq_length=8)
 
         loss, metric = model.evaluate(feature_dataset)
         feature_df.loc[ind + 1] = [feature] + [loss] + [metric]
@@ -165,4 +186,10 @@ def calculate_important_features():
 
 def show_important_features():
     feature_df = pd.read_pickle("feature_importance.pkl")
-    print(feature_df)"""
+    print(feature_df)
+
+
+train_model()
+extract_feature_importance()
+calculate_important_features()
+show_important_features()
