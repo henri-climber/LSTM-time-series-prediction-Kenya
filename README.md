@@ -6,4 +6,4 @@ It contains many different weather parameters. You can find information about th
 
 The idea is to use LSTM neural networks to predict weather parameters that are traditionally costly to measure and therefore not available in many places.
 
-Feel free to ask any questions or open issues if you have any problems.
+Feel free to ask any questions!
