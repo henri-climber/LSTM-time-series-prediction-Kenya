@@ -33,6 +33,8 @@ def create_df_of_file(filename, measure, interval, directory="Data", ):
 
     dataframe.reset_index(inplace=True, drop=True)
 
+    print(dataframe)
+
     return dataframe, time
 
 
@@ -109,18 +111,18 @@ def load_data(stations, interval=None):
     return df
 
 
-def create_tf_dataset(data, label, seq_length=3, batch_size=32):
+def create_tf_dataset(data, target, seq_length=3, batch_size=32):
     data = data[:-seq_length]
-    label = label[seq_length:]
+    target = target[seq_length:]
 
-    ds = tf.keras.utils.timeseries_dataset_from_array(data, label, sequence_length=seq_length,
+    ds = tf.keras.utils.timeseries_dataset_from_array(data, target, sequence_length=seq_length,
                                                       sequence_stride=1,
                                                       batch_size=batch_size, )
 
     return ds
 
 
-def create_final_ds(station, stations, label, interval=None, batch_size=32, seq_length=3):
+def create_final_ds(station, stations, target_feature, interval=None, batch_size=32, seq_length=3):
     if os.path.exists(f"{station}-dataframe.pkl") and interval is None:
         print("loading normal pickle")
         df = pd.read_pickle(f"{station}-dataframe.pkl")
@@ -148,9 +150,9 @@ def create_final_ds(station, stations, label, interval=None, batch_size=32, seq_
     val_df = df[int(n * 0.6):int(n * 0.8)]
     test_df = df[int(n * 0.8):]
 
-    feature_train = train_df.drop([label], axis=1)
-    feature_val = val_df.drop([label], axis=1)
-    feature_test = test_df.drop([label], axis=1)
+    feature_train = train_df.drop([target_feature], axis=1)
+    feature_val = val_df.drop([target_feature], axis=1)
+    feature_test = test_df.drop([target_feature], axis=1)
 
     feature_scaler = MinMaxScaler(feature_range=(0, 1))
     feature_scaler.fit(feature_train.to_numpy())
@@ -158,9 +160,9 @@ def create_final_ds(station, stations, label, interval=None, batch_size=32, seq_
     feature_val_scaled = feature_scaler.transform(feature_val)
     feature_test_scaled = feature_scaler.transform(feature_test)
 
-    target_train = np.array(train_df[label], ndmin=2).T
-    target_val = np.array(val_df[label], ndmin=2).T
-    target_test = np.array(test_df[label], ndmin=2).T
+    target_train = np.array(train_df[target_feature], ndmin=2).T
+    target_val = np.array(val_df[target_feature], ndmin=2).T
+    target_test = np.array(test_df[target_feature], ndmin=2).T
 
     # creating tensorflow time series datasets
     train_ds_norm = create_tf_dataset(feature_train_scaled, target_train, batch_size=batch_size, seq_length=seq_length)
@@ -173,3 +175,5 @@ def create_final_ds(station, stations, label, interval=None, batch_size=32, seq_
 
 train_ds, val_ds, test_ds, train_df, test_df, val_df = create_final_ds(
     "SHA", ["SHA", "WSH"], "SHA_nit", batch_size=32, seq_length=2, interval="24h")
+
+print(train_df)

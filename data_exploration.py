@@ -126,7 +126,7 @@ def visualize_data_correlation(time1, data1, label1, time2, data2, label2, filen
     if filename is not None:
         plt.savefig(fname=filename, dpi=100)
 
-    # plt.show()
+    plt.show()
     plt.cla()
 
 
@@ -156,12 +156,12 @@ def visualize_sha_nit_relation():
             print(f"Visualizing {station} - {category}")
             time, data = load_csv(f"{station}-{category}.csv", time_span=1)
 
-            visualize_data_correlation(time_nit, data_nit, "Nitrat", time, data, category, f"SHA-nit-{category}.png",
+            visualize_data_correlation(time_nit, data_nit, "Nitrat", time, data, category,
                                        title=f"SHA-nit-{category}")
 
 
 if __name__ == '__main__':
-    visualize_all()
+    #visualize_all()
     visualize_sha_nit_relation()
 
 
